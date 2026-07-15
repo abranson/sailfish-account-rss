@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2019 - 2023 Jolla Ltd. -->
+<!-- SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd -->
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<service id="rss-posts">
+    <type>posts</type>
+    <name>Posts</name>
+    <icon>image://theme/icon-l-rss</icon>
+    <provider>rss</provider>
+
+    <template>
+        <setting name="sync_profile_templates" type="as">["rss.Posts"]</setting>
+    </template>
+</service>

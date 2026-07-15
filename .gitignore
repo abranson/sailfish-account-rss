@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Build artefacts
+Makefile
+*.o
+*.so
+*.so.*
+*.prl
+*.ts
+*.qm
+moc_*.cpp
+*.moc
+.qmake.stash
+.tmp/
+installroot/
+RPMS/
+.mb2/
+icons/z*/
+moc_predefs.h
+target_wrapper.sh
+tests/auto/tst_rssfeedparser/tst_rssfeedparser
+tests/auto/tst_rsspostsdismissal/tst_rsspostsdismissal
+*.list

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2019 - 2023 Jolla Ltd. -->
+<!-- SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd -->
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!DOCTYPE provider>
+<provider version="1.0" id="rss">
+    <name>News (RSS/Atom)</name>
+    <description>Web feeds</description>
+    <icon>image://theme/icon-l-rss</icon>
+
+    <tags>
+        <tag>user-group:account-rss</tag>
+    </tags>
+</provider>
