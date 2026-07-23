@@ -325,6 +325,9 @@ AccountCreationAgent {
                     } else if (status === Account.Initialized && !root._configured) {
                         root._configured = true
                         displayName = root.feedTitle
+                        // Matching values show the provider as the account-list title.
+                        setConfigurationValue(
+                                    "", "default_credentials_username", root.feedTitle)
                         setConfigurationValue("rss-posts", "feed_url", root.feedUrl)
                         setConfigurationValue("", "FeedViewAutoSync", true)
                         enableWithService("rss-posts")

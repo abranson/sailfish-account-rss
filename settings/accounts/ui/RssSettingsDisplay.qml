@@ -55,6 +55,9 @@ StandardAccountSettingsDisplay {
     onAboutToSaveAccount: {
         var normalizedUrl = feedUrlField.acceptableInput
                 ? normalizeUrl(feedUrlField.text) : originalFeedUrl
+        // Keep the account-list subtitle synchronized with the description.
+        account.setConfigurationValue(
+                    "", "default_credentials_username", account.displayName)
         account.setConfigurationValue("rss-posts", "feed_url", normalizedUrl)
         account.setConfigurationValue("", "FeedViewAutoSync", autoSyncSwitch.checked)
         settingsLoader.updateAllSyncProfiles()
