@@ -77,27 +77,30 @@ void RssPostsDatabase::markAllPostsDeletedLocally()
 
 QString RssPostsDatabase::url(const SocialPost::ConstPtr &post)
 {
-    return post ? post->extraString(QLatin1String(UrlKey)) : QString();
+    return post ? post->extra().value(QLatin1String(UrlKey)).toString()
+                : QString();
 }
 
 QString RssPostsDatabase::feedTitle(const SocialPost::ConstPtr &post)
 {
-    return post ? post->extraString(QLatin1String(FeedTitleKey)) : QString();
+    return post ? post->extra().value(QLatin1String(FeedTitleKey)).toString()
+                : QString();
 }
 
 QString RssPostsDatabase::author(const SocialPost::ConstPtr &post)
 {
-    return post ? post->extraString(QLatin1String(AuthorKey)) : QString();
+    return post ? post->extra().value(QLatin1String(AuthorKey)).toString()
+                : QString();
 }
 
 bool RssPostsDatabase::timestampValid(const SocialPost::ConstPtr &post)
 {
-    return post && post->extraBool(QLatin1String(TimestampValidKey));
+    return post && post->extra().value(QLatin1String(TimestampValidKey)).toBool();
 }
 
 bool RssPostsDatabase::deletedLocally(const SocialPost::ConstPtr &post)
 {
-    return post && post->extraBool(QLatin1String(DeletedLocallyKey));
+    return post && post->extra().value(QLatin1String(DeletedLocallyKey)).toBool();
 }
 
 bool RssPostsDatabase::queuePostDeletedLocally(const SocialPost::ConstPtr &post)
