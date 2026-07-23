@@ -7,7 +7,7 @@ TEMPLATE = lib
 TARGET = rss-posts-client
 
 QT -= gui
-QT += network
+QT += dbus network
 
 CONFIG += plugin link_pkgconfig
 PKGCONFIG += \

@@ -14,6 +14,7 @@ BuildRequires: qt5-qmake
 BuildRequires: qt5-qttools-linguist
 BuildRequires: sailfish-svg2png
 BuildRequires: pkgconfig(Qt5Core)
+BuildRequires: pkgconfig(Qt5DBus)
 BuildRequires: pkgconfig(Qt5Network)
 BuildRequires: pkgconfig(Qt5Qml)
 BuildRequires: pkgconfig(Qt5Sql)
