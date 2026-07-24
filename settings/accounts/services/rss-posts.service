@@ -10,5 +10,11 @@
 
     <template>
         <setting name="sync_profile_templates" type="as">["rss.Posts"]</setting>
+        <setting name="requires_auth" type="b">false</setting>
+        <setting name="auth_username"></setting>
+        <group name="auth">
+            <setting name="method">password</setting>
+            <setting name="mechanism">password</setting>
+        </group>
     </template>
 </service>

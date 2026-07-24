@@ -15,8 +15,13 @@ AccountCreationAgent {
 
     property string feedUrl
     property string feedTitle
+    property bool requiresAuthentication
+    property string authenticationUsername
+    property string authenticationPassword
     property int _accountId
     property bool _configured
+    property bool _credentialsCreated
+    property bool _credentialsCreationStarted
     property bool _reported
     property bool _rollingBack
     property string _rollbackMessage
@@ -30,6 +35,10 @@ AccountCreationAgent {
             url = "https://" + url
         }
         return url
+    }
+
+    function isHttpsUrl(value) {
+        return /^https:\/\//i.test(normalizeUrl(value))
     }
 
     function fallbackTitle(url) {
@@ -70,19 +79,35 @@ AccountCreationAgent {
         delayDeletion = false
     }
 
-    RssFeedValidator {
-        id: feedValidator
-    }
-
     initialPage: Dialog {
         id: setupDialog
 
+        property bool authenticationUrlSecure: root.isHttpsUrl(urlField.text)
+
         canAccept: urlField.acceptableInput
+                   && (!authenticationSwitch.checked
+                       || (authenticationUrlSecure
+                           && usernameField.text.length > 0
+                           && passwordField.text.length > 0))
         acceptDestination: busyComponent
         acceptDestinationAction: PageStackAction.Push
 
-        onAccepted: root.feedUrl = root.normalizeUrl(urlField.text)
-        onAcceptBlocked: urlField.errorHighlight = true
+        onAccepted: {
+            root.feedUrl = root.normalizeUrl(urlField.text)
+            root.requiresAuthentication = authenticationSwitch.checked
+            root.authenticationUsername = authenticationSwitch.checked
+                    ? usernameField.text : ""
+            root.authenticationPassword = authenticationSwitch.checked
+                    ? passwordField.text : ""
+        }
+        onAcceptBlocked: {
+            urlField.errorHighlight = !urlField.acceptableInput
+                    || (authenticationSwitch.checked && !authenticationUrlSecure)
+            usernameField.errorHighlight = authenticationSwitch.checked
+                    && usernameField.text.length === 0
+            passwordField.errorHighlight = authenticationSwitch.checked
+                    && passwordField.text.length === 0
+        }
 
         Column {
             width: parent.width
@@ -155,8 +180,78 @@ AccountCreationAgent {
                         //% "Feed URL is required"
                         return qsTrId("settings-accounts-rss-la-feed_url_required")
                     }
+                    if (authenticationSwitch.checked
+                            && !setupDialog.authenticationUrlSecure) {
+                        //% "Authenticated feeds must use HTTPS"
+                        return qsTrId("settings-accounts-rss-la-authentication_requires_https")
+                    }
                     //% "Enter a valid HTTP or HTTPS feed URL"
                     return qsTrId("settings-accounts-rss-la-feed_url_invalid")
+                }
+            }
+
+            TextSwitch {
+                id: authenticationSwitch
+
+                width: parent.width
+                //% "Requires authentication"
+                text: qsTrId("settings-accounts-rss-la-requires_authentication")
+                //% "Use HTTP Basic authentication for this feed."
+                description: qsTrId(
+                                 "settings-accounts-rss-la-requires_authentication_description")
+
+                onCheckedChanged: {
+                    if (!checked) {
+                        usernameField.errorHighlight = false
+                        passwordField.text = ""
+                        passwordField.errorHighlight = false
+                    }
+                }
+            }
+
+            Column {
+                width: parent.width
+                visible: authenticationSwitch.checked
+
+                TextField {
+                    id: usernameField
+
+                    width: parent.width
+                    inputMethodHints: Qt.ImhNoPredictiveText
+                                      | Qt.ImhNoAutoUppercase
+                    //% "Username"
+                    label: qsTrId("settings-accounts-rss-la-username")
+                    description: {
+                        if (!errorHighlight) {
+                            return ""
+                        }
+                        //% "Username is required"
+                        return qsTrId("settings-accounts-rss-la-username_required")
+                    }
+                    EnterKey.iconSource: "image://theme/icon-m-enter-next"
+                    EnterKey.onClicked: passwordField.forceActiveFocus()
+
+                    onTextChanged: errorHighlight = false
+                }
+
+                PasswordField {
+                    id: passwordField
+
+                    width: parent.width
+                    //% "Password"
+                    label: qsTrId("settings-accounts-rss-la-password")
+                    description: {
+                        if (!errorHighlight) {
+                            return ""
+                        }
+                        //% "Password is required"
+                        return qsTrId("settings-accounts-rss-la-password_required")
+                    }
+                    EnterKey.enabled: setupDialog.canAccept
+                    EnterKey.iconSource: "image://theme/icon-m-enter-accept"
+                    EnterKey.onClicked: setupDialog.accept()
+
+                    onTextChanged: errorHighlight = false
                 }
             }
         }
@@ -168,67 +263,24 @@ AccountCreationAgent {
         AccountBusyPage {
             id: busyPage
 
-            property var feedRequest
+            property int feedRequestId
 
             //% "Checking feed"
             busyDescription: qsTrId("settings-accounts-rss-la-checking_feed")
 
             function cancelRequest() {
-                var request = feedRequest
-                feedRequest = null
-                requestTimeout.stop()
-                if (request) {
-                    request.abort()
+                if (feedRequestId !== 0) {
+                    feedValidator.cancelFetch(feedRequestId)
+                    feedRequestId = 0
                 }
             }
 
             function startRequest() {
-                var request = new XMLHttpRequest()
-                feedRequest = request
-                request.onreadystatechange = function() {
-                    if (request !== busyPage.feedRequest
-                            || request.readyState !== XMLHttpRequest.DONE) {
-                        return
-                    }
-
-                    busyPage.feedRequest = null
-                    requestTimeout.stop()
-                    if (request.status < 200 || request.status >= 300) {
-                        //% "The feed could not be downloaded."
-                        root.showError(
-                                    busyPage,
-                                    qsTrId("settings-accounts-rss-la-download_failed"))
-                        return
-                    }
-
-                    var details = feedValidator.validate(request.responseText,
-                                                         root.feedUrl)
-                    if (details.tooLarge) {
-                        //% "The feed is too large."
-                        root.showError(
-                                    busyPage,
-                                    qsTrId("settings-accounts-rss-la-feed_too_large"))
-                        return
-                    }
-                    if (!details.valid) {
-                        //% "The URL does not contain an RSS 2.0 or Atom 1.0 feed."
-                        root.showError(
-                                    busyPage,
-                                    qsTrId("settings-accounts-rss-la-invalid_feed"))
-                        return
-                    }
-
-                    var title = details.title ? String(details.title).trim() : ""
-                    root.feedTitle = title.length > 0
-                            ? title : root.fallbackTitle(root.feedUrl)
-                    busyPage.createAccount()
-                }
-                request.open("GET", root.feedUrl)
-                request.setRequestHeader(
-                            "Accept",
-                            "application/rss+xml, application/atom+xml, application/xml, text/xml")
-                requestTimeout.start()
-                request.send()
+                feedRequestId = feedValidator.fetch(
+                            root.feedUrl,
+                            root.authenticationUsername,
+                            root.authenticationPassword,
+                            root.requiresAuthentication)
             }
 
             function createAccount() {
@@ -259,6 +311,60 @@ AccountCreationAgent {
                 newAccount.remove()
             }
 
+            RssFeedValidator {
+                id: feedValidator
+
+                onFetchFinished: {
+                    if (requestId !== busyPage.feedRequestId) {
+                        return
+                    }
+
+                    busyPage.feedRequestId = 0
+                    if (tooLarge) {
+                        //% "The feed is too large."
+                        root.showError(
+                                    busyPage,
+                                    qsTrId("settings-accounts-rss-la-feed_too_large"))
+                        return
+                    }
+                    if (timedOut) {
+                        //% "The feed request timed out."
+                        root.showError(
+                                    busyPage,
+                                    qsTrId("settings-accounts-rss-la-request_timed_out"))
+                        return
+                    }
+                    if (!success) {
+                        //% "The feed could not be downloaded."
+                        root.showError(
+                                    busyPage,
+                                    qsTrId("settings-accounts-rss-la-download_failed"))
+                        return
+                    }
+
+                    var details = feedValidator.validate(data, responseUrl)
+                    if (details.tooLarge) {
+                        //% "The feed is too large."
+                        root.showError(
+                                    busyPage,
+                                    qsTrId("settings-accounts-rss-la-feed_too_large"))
+                        return
+                    }
+                    if (!details.valid) {
+                        //% "The URL does not contain an RSS 2.0 or Atom 1.0 feed."
+                        root.showError(
+                                    busyPage,
+                                    qsTrId("settings-accounts-rss-la-invalid_feed"))
+                        return
+                    }
+
+                    var title = details.title ? String(details.title).trim() : ""
+                    root.feedTitle = title.length > 0
+                            ? title : root.fallbackTitle(root.feedUrl)
+                    busyPage.createAccount()
+                }
+            }
+
             function finishCreation() {
                 if (root._reported) {
                     return
@@ -279,23 +385,6 @@ AccountCreationAgent {
                 interval: 300
                 running: busyPage.status === PageStatus.Active
                 onTriggered: busyPage.startRequest()
-            }
-
-            Timer {
-                id: requestTimeout
-
-                interval: 60000
-                onTriggered: {
-                    var request = busyPage.feedRequest
-                    busyPage.feedRequest = null
-                    if (request) {
-                        request.abort()
-                    }
-                    //% "The feed request timed out."
-                    root.showError(
-                                busyPage,
-                                qsTrId("settings-accounts-rss-la-request_timed_out"))
-                }
             }
 
             AccountManager {
@@ -353,13 +442,31 @@ AccountCreationAgent {
                         setConfigurationValue(
                                     "", "default_credentials_username", root.feedTitle)
                         setConfigurationValue("rss-posts", "feed_url", root.feedUrl)
+                        setConfigurationValue(
+                                    "rss-posts", "requires_auth",
+                                    root.requiresAuthentication)
+                        setConfigurationValue(
+                                    "rss-posts", "auth_username",
+                                    root.requiresAuthentication
+                                    ? root.authenticationUsername : "")
                         setConfigurationValue("", "FeedViewAutoSync", true)
                         enableWithService("rss-posts")
                         enabled = true
                         sync()
                     } else if (status === Account.Synced
-                               && root._configured && !root._reported) {
-                        if (profileManager.createAllProfiles(identifier) === 0) {
+                               && root._configured
+                               && !root._reported) {
+                        if (root.requiresAuthentication && !root._credentialsCreated) {
+                            if (!root._credentialsCreationStarted) {
+                                root._credentialsCreationStarted = true
+                                createSignInCredentials(
+                                            "Jolla", "Jolla",
+                                            signInParameters(
+                                                "rss-posts",
+                                                root.authenticationUsername,
+                                                root.authenticationPassword))
+                            }
+                        } else if (profileManager.createAllProfiles(identifier) === 0) {
                             busyPage.finishCreation()
                         }
                     } else if ((status === Account.Error || status === Account.Invalid)
@@ -369,6 +476,34 @@ AccountCreationAgent {
                         busyPage.rollbackAccount(
                                     qsTrId("settings-accounts-rss-la-account_save_failed"))
                     }
+                }
+
+                onSignInCredentialsCreated: {
+                    if (!root._credentialsCreationStarted
+                            || root._credentialsCreated) {
+                        return
+                    }
+
+                    root._credentialsCreationStarted = false
+                    root._credentialsCreated = true
+                    root.authenticationPassword = ""
+                    // Credentials creation updates this value to the username.
+                    setConfigurationValue(
+                                "", "default_credentials_username", root.feedTitle)
+                    sync()
+                }
+
+                onSignInError: {
+                    if (!root._credentialsCreationStarted
+                            || root._rollingBack || root._reported) {
+                        return
+                    }
+
+                    root._credentialsCreationStarted = false
+                    root.authenticationPassword = ""
+                    //% "The feed credentials could not be saved."
+                    busyPage.rollbackAccount(
+                                qsTrId("settings-accounts-rss-la-account_credentials_save_failed"))
                 }
             }
 

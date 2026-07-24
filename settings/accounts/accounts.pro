@@ -14,7 +14,8 @@ services.path = /usr/share/accounts/services
 ui.files = \
     ui/RssSettingsDisplay.qml \
     ui/rss.qml \
-    ui/rss-settings.qml
+    ui/rss-settings.qml \
+    ui/rss-update.qml
 ui.path = /usr/share/accounts/ui
 
 desktop.files = rss-import.desktop

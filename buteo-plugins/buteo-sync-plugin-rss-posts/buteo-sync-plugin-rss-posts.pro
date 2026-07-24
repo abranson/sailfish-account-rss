@@ -13,6 +13,7 @@ CONFIG += plugin link_pkgconfig
 PKGCONFIG += \
     accounts-qt5 \
     buteosyncfw5 \
+    libsignon-qt5 \
     socialcache
 
 include($$PWD/../../common/common.pri)

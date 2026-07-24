@@ -11,7 +11,7 @@ MODULENAME = com/jolla/settings/accounts/rss
 TARGETPATH = $$[QT_INSTALL_QML]/$$MODULENAME
 
 QT -= gui
-QT += qml sql
+QT += network qml sql
 CONFIG += plugin link_pkgconfig
 PKGCONFIG += socialcache
 

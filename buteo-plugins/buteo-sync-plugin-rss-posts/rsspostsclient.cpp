@@ -11,10 +11,17 @@
 #include "rsspostsdatabase.h"
 
 #include <Accounts/Account>
+#include <Accounts/AccountService>
+#include <Accounts/AuthData>
 #include <Accounts/Manager>
 #include <Accounts/Service>
 
 #include <ProfileEngineDefs.h>
+
+#include <SignOn/AuthSession>
+#include <SignOn/Error>
+#include <SignOn/Identity>
+#include <SignOn/SessionData>
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -35,7 +42,28 @@ namespace {
 const int MaximumResponseSize = 5 * 1024 * 1024;
 const int MaximumPosts = 20;
 const int RequestTimeout = 60 * 1000;
+const int MaximumRedirects = 5;
 const char DefaultFeedIcon[] = "image://theme/icon-l-rss";
+
+bool secureHttpUrl(const QUrl &url)
+{
+    return url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0;
+}
+
+int effectivePort(const QUrl &url)
+{
+    if (url.port() >= 0) {
+        return url.port();
+    }
+    return secureHttpUrl(url) ? 443 : 80;
+}
+
+bool sameOrigin(const QUrl &left, const QUrl &right)
+{
+    return left.scheme().compare(right.scheme(), Qt::CaseInsensitive) == 0
+            && left.host().compare(right.host(), Qt::CaseInsensitive) == 0
+            && effectivePort(left) == effectivePort(right);
+}
 
 bool newestFirst(const RssFeedItem &left, const RssFeedItem &right)
 {
@@ -103,6 +131,8 @@ bool RssPostsClient::uninit()
     if (m_reply) {
         m_reply->abort();
     }
+    clearSignOnSession();
+    m_authorization.clear();
     return true;
 }
 
@@ -120,6 +150,15 @@ bool RssPostsClient::loadAccountConfiguration()
                 QStringLiteral("rss-posts"));
     account->selectService(service);
     m_feedUrl = QUrl(account->value(QStringLiteral("feed_url")).toString().trimmed());
+    m_requiresAuthentication = account->value(
+                QStringLiteral("requires_auth")).toBool();
+    m_authUsername = account->value(QStringLiteral("auth_username")).toString();
+    m_credentialsId = account->credentialsId();
+    const Accounts::AccountService accountService(account, service);
+    const Accounts::AuthData authData = accountService.authData();
+    m_authMethod = authData.method();
+    m_authMechanism = authData.mechanism();
+    m_authParameters = authData.parameters();
     account->deleteLater();
 
     const QString scheme = m_feedUrl.scheme().toLower();
@@ -139,13 +178,54 @@ bool RssPostsClient::startSync()
 
     m_completed = false;
     m_responseData.clear();
+    clearSignOnSession();
+    m_authorization.clear();
+    m_redirectCount = 0;
 
-    QNetworkRequest request(m_feedUrl);
-    request.setAttribute(QNetworkRequest::FollowRedirectsAttribute, true);
+    if (m_requiresAuthentication) {
+        if (!secureHttpUrl(m_feedUrl)) {
+            qCWarning(lcRssPosts) << "Refusing HTTP Basic authentication for RSS account"
+                                  << m_accountId;
+            completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
+                            QStringLiteral("Authenticated RSS feeds must use HTTPS."));
+            return true;
+        }
+        if (m_credentialsId <= 0 || m_authMethod.isEmpty()
+                || m_authMechanism.isEmpty()) {
+            completeFailure(Buteo::SyncResults::INTERNAL_ERROR,
+                            QStringLiteral("The RSS feed credentials could not be read."));
+            return true;
+        }
+
+        emit syncProgressDetail(iProfile.name(), Sync::SYNC_PROGRESS_RECEIVING_ITEMS);
+        if (!readCredentials()) {
+            completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
+                            QStringLiteral("The RSS feed credentials could not be read."));
+        }
+        return true;
+    }
+
+    return startRequest(m_feedUrl);
+}
+
+bool RssPostsClient::startRequest(const QUrl &url)
+{
+    if (!m_networkManager || !m_timeoutTimer || m_reply) {
+        return false;
+    }
+
+    QNetworkRequest request(url);
+    // Follow authenticated redirects ourselves so credentials cannot be sent
+    // to a different origin.
+    request.setAttribute(QNetworkRequest::FollowRedirectsAttribute,
+                         !m_requiresAuthentication);
     request.setRawHeader("Accept",
                          "application/rss+xml, application/atom+xml, "
                          "application/xml, text/xml;q=0.9, */*;q=0.1");
     request.setRawHeader("User-Agent", "Sailfish-RSS/1.0");
+    if (!m_authorization.isEmpty()) {
+        request.setRawHeader("Authorization", m_authorization);
+    }
 
     emit syncProgressDetail(iProfile.name(), Sync::SYNC_PROGRESS_RECEIVING_ITEMS);
     m_reply = m_networkManager->get(request);
@@ -155,6 +235,125 @@ bool RssPostsClient::startSync()
             this, &RssPostsClient::replyFinished);
     m_timeoutTimer->start(RequestTimeout);
     return true;
+}
+
+bool RssPostsClient::readCredentials()
+{
+    m_signonIdentity = SignOn::Identity::existingIdentity(m_credentialsId, this);
+    if (!m_signonIdentity) {
+        qCWarning(lcRssPosts) << "No credentials are available for RSS account"
+                              << m_accountId;
+        return false;
+    }
+
+    const SignOn::AuthSessionP session = m_signonIdentity->createSession(m_authMethod);
+    m_signonSession = session.data();
+    if (!m_signonSession) {
+        qCWarning(lcRssPosts) << "Unable to create a SignOn session for RSS account"
+                              << m_accountId;
+        clearSignOnSession();
+        return false;
+    }
+
+    connect(m_signonSession, &SignOn::AuthSession::response,
+            this, &RssPostsClient::credentialsReady);
+    connect(m_signonSession, &SignOn::AuthSession::error,
+            this, &RssPostsClient::credentialsError);
+
+    SignOn::SessionData requestData(m_authParameters);
+    requestData.setUiPolicy(SignOn::NoUserInteractionPolicy);
+    m_signonSession->process(requestData, m_authMechanism);
+    return true;
+}
+
+void RssPostsClient::credentialsReady(const SignOn::SessionData &credentials)
+{
+    if (m_completed) {
+        return;
+    }
+
+    QString username = credentials.UserName();
+    QString password = credentials.Secret();
+    if (username.isEmpty() || password.isEmpty()) {
+        const QStringList propertyNames = credentials.propertyNames();
+        for (const QString &name : propertyNames) {
+            const QString lowerName = name.toLower();
+            if (username.isEmpty() && lowerName == QLatin1String("username")) {
+                username = credentials.getProperty(name).toString();
+            } else if (password.isEmpty()
+                       && (lowerName == QLatin1String("secret")
+                           || lowerName == QLatin1String("password"))) {
+                password = credentials.getProperty(name).toString();
+            }
+        }
+    }
+    clearSignOnSession();
+
+    if (username.isEmpty()) {
+        username = m_authUsername;
+    }
+    if (username.isEmpty() || password.isEmpty()) {
+        completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
+                        QStringLiteral("The RSS feed credentials are incomplete."));
+        return;
+    }
+
+    m_authorization = QByteArrayLiteral("Basic ")
+            + (username + QLatin1Char(':') + password).toUtf8().toBase64();
+    m_authenticatedOrigin = m_feedUrl;
+    m_redirectCount = 0;
+    if (!startRequest(m_feedUrl)) {
+        completeFailure(Buteo::SyncResults::INTERNAL_ERROR,
+                        QStringLiteral("The RSS feed request could not be started."));
+    }
+}
+
+void RssPostsClient::credentialsError(const SignOn::Error &error)
+{
+    if (m_completed) {
+        return;
+    }
+
+    qCWarning(lcRssPosts) << "Unable to read credentials for RSS account"
+                          << m_accountId << "with SignOn error" << error.type();
+    clearSignOnSession();
+    completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
+                    QStringLiteral("The RSS feed credentials could not be read."));
+}
+
+void RssPostsClient::clearSignOnSession()
+{
+    if (m_signonSession) {
+        m_signonSession->disconnect(this);
+        m_signonSession = nullptr;
+    }
+    if (m_signonIdentity) {
+        m_signonIdentity->deleteLater();
+        m_signonIdentity = nullptr;
+    }
+}
+
+void RssPostsClient::setCredentialsNeedUpdate()
+{
+    Accounts::Account *account = Accounts::Account::fromId(
+                m_accountManager, m_accountId, this);
+    if (!account) {
+        qCWarning(lcRssPosts) << "Unable to mark credentials as needing an update for RSS account"
+                              << m_accountId;
+        return;
+    }
+
+    const Accounts::Service service = m_accountManager->service(
+                QStringLiteral("rss-posts"));
+    if (service.isValid()) {
+        account->selectService(service);
+        account->setValue(QStringLiteral("CredentialsNeedUpdate"), true);
+        account->setValue(QStringLiteral("CredentialsNeedUpdateFrom"),
+                          QStringLiteral("buteo-rss-posts"));
+        account->selectService(Accounts::Service());
+        account->syncAndBlock();
+    }
+    account->deleteLater();
 }
 
 void RssPostsClient::replyReadyRead()
@@ -182,19 +381,54 @@ void RssPostsClient::replyFinished()
     }
 
     if (!m_completed) {
-        m_responseData.append(reply->readAll());
         const int httpStatus = reply->attribute(
                     QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QUrl redirectTarget = reply->attribute(
+                    QNetworkRequest::RedirectionTargetAttribute).toUrl();
+        if (m_requiresAuthentication && httpStatus >= 300 && httpStatus < 400
+                && !redirectTarget.isEmpty() && redirectTarget.isValid()) {
+            const QUrl redirectUrl = reply->url().resolved(redirectTarget);
+            if (!secureHttpUrl(redirectUrl)
+                    || !sameOrigin(m_authenticatedOrigin, redirectUrl)
+                    || m_redirectCount >= MaximumRedirects) {
+                qCWarning(lcRssPosts) << "Refusing redirect for authenticated RSS account"
+                                      << m_accountId;
+                completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
+                                QStringLiteral("The authenticated RSS feed was redirected."));
+                reply->deleteLater();
+                return;
+            } else {
+                ++m_redirectCount;
+                m_responseData.clear();
+                reply->deleteLater();
+                if (!startRequest(redirectUrl)) {
+                    completeFailure(Buteo::SyncResults::INTERNAL_ERROR,
+                                    QStringLiteral("The RSS feed request could not be started."));
+                }
+                return;
+            }
+        }
+
+        m_responseData.append(reply->readAll());
 
         if (m_responseData.size() > MaximumResponseSize) {
             completeFailure(Buteo::SyncResults::INTERNAL_ERROR,
                             QStringLiteral("The RSS feed response is too large."));
         } else if (reply->error() != QNetworkReply::NoError) {
+            if (m_requiresAuthentication
+                    && (httpStatus == 401
+                        || reply->error()
+                        == QNetworkReply::AuthenticationRequiredError)) {
+                setCredentialsNeedUpdate();
+            }
             qCWarning(lcRssPosts) << "RSS request failed with network error"
                                   << reply->error() << "and HTTP status" << httpStatus;
             completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
                             QStringLiteral("The RSS feed could not be downloaded."));
         } else if (httpStatus < 200 || httpStatus >= 300) {
+            if (m_requiresAuthentication && httpStatus == 401) {
+                setCredentialsNeedUpdate();
+            }
             qCWarning(lcRssPosts) << "RSS request returned HTTP status" << httpStatus;
             completeFailure(Buteo::SyncResults::CONNECTION_ERROR,
                             QStringLiteral("The RSS server returned an error."));
@@ -369,6 +603,8 @@ void RssPostsClient::completeSuccess(unsigned int added, unsigned int deleted)
     if (m_timeoutTimer) {
         m_timeoutTimer->stop();
     }
+    clearSignOnSession();
+    m_authorization.clear();
 
     m_results = Buteo::SyncResults(QDateTime::currentDateTimeUtc(),
                                    Buteo::SyncResults::SYNC_RESULT_SUCCESS,
@@ -390,6 +626,8 @@ void RssPostsClient::completeFailure(Buteo::SyncResults::MinorCode code,
     if (m_timeoutTimer) {
         m_timeoutTimer->stop();
     }
+    clearSignOnSession();
+    m_authorization.clear();
 
     m_results = Buteo::SyncResults(QDateTime::currentDateTimeUtc(),
                                    Buteo::SyncResults::SYNC_RESULT_FAILED,
@@ -407,6 +645,8 @@ void RssPostsClient::abortWithFailure(Buteo::SyncResults::MinorCode code,
     if (m_timeoutTimer) {
         m_timeoutTimer->stop();
     }
+    clearSignOnSession();
+    m_authorization.clear();
 
     m_results = Buteo::SyncResults(QDateTime::currentDateTimeUtc(),
                                    Buteo::SyncResults::SYNC_RESULT_FAILED,

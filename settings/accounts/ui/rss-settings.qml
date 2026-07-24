@@ -29,7 +29,7 @@ AccountSettingsAgent {
         }
 
         onPageContainerChanged: {
-            if (pageContainer == null) {
+            if (pageContainer == null && !credentialsUpdater.running) {
                 root.delayDeletion = true
                 if (!settingsDisplay.feedUrlValid) {
                     settingsDisplay.discardInvalidFeedUrl()
@@ -43,7 +43,7 @@ AccountSettingsAgent {
         }
 
         Component.onDestruction: {
-            if (status === PageStatus.Active) {
+            if (status === PageStatus.Active && !credentialsUpdater.running) {
                 settingsDisplay.saveAccount(true)
             }
         }
@@ -54,9 +54,12 @@ AccountSettingsAgent {
 
             StandardAccountSettingsPullDownMenu {
                 visible: settingsDisplay.accountValid
-                allowCredentialsUpdate: false
+                allowCredentialsUpdate: true
                 allowSync: true
 
+                onCredentialsUpdateRequested: {
+                    credentialsUpdater.replaceWithCredentialsUpdatePage(root.accountId)
+                }
                 onAccountDeletionRequested: {
                     root.accountDeletionRequested()
                     pageStack.pop()
@@ -95,6 +98,10 @@ AccountSettingsAgent {
             }
 
             VerticalScrollDecorator {}
+        }
+
+        AccountCredentialsUpdater {
+            id: credentialsUpdater
         }
     }
 }

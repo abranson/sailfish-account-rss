@@ -16,9 +16,16 @@
 
 #include <QByteArray>
 #include <QUrl>
+#include <QVariant>
 
 namespace Accounts {
 class Manager;
+}
+namespace SignOn {
+class AuthSession;
+class Error;
+class Identity;
+class SessionData;
 }
 
 class QNetworkAccessManager;
@@ -50,12 +57,18 @@ private slots:
     void replyReadyRead();
     void replyFinished();
     void requestTimedOut();
+    void credentialsReady(const SignOn::SessionData &credentials);
+    void credentialsError(const SignOn::Error &error);
 
 private:
     bool loadAccountConfiguration();
+    bool readCredentials();
+    bool startRequest(const QUrl &url);
     bool storeFeed(const QByteArray &data, const QUrl &baseUrl,
                    unsigned int *added, unsigned int *deleted);
     QString postIdentifier(const QString &sourceIdentity) const;
+    void clearSignOnSession();
+    void setCredentialsNeedUpdate();
     void completeSuccess(unsigned int added, unsigned int deleted);
     void completeFailure(Buteo::SyncResults::MinorCode code,
                          const QString &message);
@@ -64,14 +77,25 @@ private:
 
     const Buteo::Profile *m_clientProfile = nullptr;
     Accounts::Manager *m_accountManager = nullptr;
+    SignOn::Identity *m_signonIdentity = nullptr;
+    SignOn::AuthSession *m_signonSession = nullptr;
     QNetworkAccessManager *m_networkManager = nullptr;
     QNetworkReply *m_reply = nullptr;
     QTimer *m_timeoutTimer = nullptr;
     RssPostsDatabase *m_database = nullptr;
     QByteArray m_responseData;
+    QByteArray m_authorization;
     QUrl m_feedUrl;
+    QUrl m_authenticatedOrigin;
     QString m_accountDisplayName;
+    QString m_authUsername;
+    QString m_authMethod;
+    QString m_authMechanism;
+    QVariantMap m_authParameters;
     int m_accountId = 0;
+    int m_credentialsId = 0;
+    int m_redirectCount = 0;
+    bool m_requiresAuthentication = false;
     bool m_completed = false;
     Buteo::SyncResults m_results;
 };

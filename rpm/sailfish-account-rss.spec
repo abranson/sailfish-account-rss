@@ -20,6 +20,7 @@ BuildRequires: pkgconfig(Qt5Qml)
 BuildRequires: pkgconfig(Qt5Sql)
 BuildRequires: pkgconfig(accounts-qt5)
 BuildRequires: pkgconfig(buteosyncfw5) >= 0.10.0
+BuildRequires: pkgconfig(libsignon-qt5)
 BuildRequires: pkgconfig(socialcache)
 
 Requires: buteo-syncfw-qt5-msyncd
@@ -35,8 +36,9 @@ Requires(post): %{_libexecdir}/manage-groups
 Requires(postun): %{_libexecdir}/manage-groups
 
 %description
-Adds unauthenticated RSS and Atom feed accounts to Sailfish OS and displays
-their cached entries in a unified News group in Events.
+Adds RSS and Atom feed accounts to Sailfish OS, with optional HTTP Basic
+authentication, and displays their cached entries in a unified News group in
+Events.
 
 %prep
 %setup -q -n %{name}-%{version}
@@ -69,6 +71,7 @@ fi
 %{_datadir}/accounts/ui/RssSettingsDisplay.qml
 %{_datadir}/accounts/ui/rss.qml
 %{_datadir}/accounts/ui/rss-settings.qml
+%{_datadir}/accounts/ui/rss-update.qml
 %{_datadir}/applications/rss-import.desktop
 %{_libdir}/qt5/qml/com/jolla/settings/accounts/rss/*
 %{_libdir}/buteo-plugins-qt5/oopp/librss-posts-client.so
