@@ -17,5 +17,8 @@ ui.files = \
     ui/rss-settings.qml
 ui.path = /usr/share/accounts/ui
 
-OTHER_FILES += $$provider.files $$services.files $$ui.files
-INSTALLS += provider services ui
+desktop.files = rss-import.desktop
+desktop.path = /usr/share/applications
+
+OTHER_FILES += $$provider.files $$services.files $$ui.files $$desktop.files
+INSTALLS += provider services ui desktop

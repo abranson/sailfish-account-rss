@@ -37,6 +37,29 @@ AccountCreationAgent {
         return withoutScheme.split("/")[0]
     }
 
+    function registeredAccountId(url) {
+        var normalizedUrl = normalizeUrl(url)
+        var accountIds = existingAccountManager.providerAccountIdentifiers("rss")
+        for (var i = 0; i < accountIds.length; ++i) {
+            var account = existingAccountManager.account(accountIds[i])
+            if (account && normalizeUrl(
+                        account.configurationValues("rss-posts")["feed_url"])
+                    === normalizedUrl) {
+                return accountIds[i]
+            }
+        }
+        return 0
+    }
+
+    function setFeedUrl(url) {
+        feedUrl = normalizeUrl(url)
+        return registeredAccountId(feedUrl) === 0
+    }
+
+    AccountManager {
+        id: existingAccountManager
+    }
+
     function showError(busyPage, message) {
         if (busyPage.state === "info") {
             return
@@ -102,6 +125,7 @@ AccountCreationAgent {
 
                 width: parent.width
                 focus: true
+                text: root.feedUrl
                 validator: RegExpValidator {
                     regExp: /^(https?:\/\/)?[^\s\/]+\.[^\s\/]+(\/.*)?$/i
                 }

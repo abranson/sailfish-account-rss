@@ -69,6 +69,7 @@ fi
 %{_datadir}/accounts/ui/RssSettingsDisplay.qml
 %{_datadir}/accounts/ui/rss.qml
 %{_datadir}/accounts/ui/rss-settings.qml
+%{_datadir}/applications/rss-import.desktop
 %{_libdir}/qt5/qml/com/jolla/settings/accounts/rss/*
 %{_libdir}/buteo-plugins-qt5/oopp/librss-posts-client.so
 %config %{_sysconfdir}/buteo/profiles/client/rss-posts.xml

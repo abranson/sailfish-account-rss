@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Jolla Mobile Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+[Desktop Entry]
+Type=Application
+Name=Settings
+NoDisplay=true
+Icon=icon-launcher-settings
+X-MeeGo-Logical-Id=settings-ap-name
+X-MeeGo-Translation-Catalog=settings
+Comment=Sailfish MimeType Handler for RSS and Atom feeds
+MimeType=application/rss+xml;application/atom+xml;
+X-Maemo-Service=com.jolla.settings
+X-Maemo-Method=com.jolla.settings.ui.importRss
+X-Maemo-Object-Path=/com/jolla/settings/ui
